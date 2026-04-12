@@ -1,0 +1,118 @@
+TELEGRAM STORAGE BOT - SETUP GUIDE
+==================================
+
+REQUIREMENTS:
+- Python 3.8+
+- Telegram Bot Token
+- Telegram Channel ID
+- Cloud storage (local folder or Google Drive)
+
+
+STEP 1: CREATE TELEGRAM BOT
+---------------------------
+1. Message @BotFather on Telegram
+2. Send /newbot
+3. Follow prompts to create bot
+4. Copy the Bot Token (example: 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)
+5. Add your bot to your Telegram channel as an administrator
+
+
+STEP 2: GET CHANNEL ID
+----------------------
+1. Add @RawDataBot to your channel
+2. Post a message in the channel
+3. @RawDataBot will show channel ID in format: -100XXXXXXXXXX
+4. Copy the channel ID
+
+
+STEP 3: CONFIGURE BOT
+---------------------
+Edit telegram_storage_bot.py and update:
+
+   BOT_TOKEN = "your_bot_token_here"
+   CHANNEL_ID = "-100your_channel_id"
+   ITEMS_PER_DAY = 1  # How many files to post daily
+   POST_HOUR = 9      # What hour to post (24-hour format)
+   POST_MINUTE = 0    # Minutes
+
+   # Choose ONE of these:
+   
+   A) LOCAL FOLDER:
+      LOCAL_PATH = "/path/to/your/folder"
+      GOOGLE_DRIVE_FOLDER_ID = None
+   
+   B) GOOGLE DRIVE:
+      LOCAL_PATH = None
+      GOOGLE_DRIVE_FOLDER_ID = "folder_id_from_google_drive"
+
+
+STEP 4A: LOCAL FOLDER SETUP
+----------------------------
+Place supported files in your folder:
+- Images: .jpg, .jpeg, .png, .gif
+- Videos: .mp4, .webm
+- Documents: .pdf, .txt
+
+No additional authentication needed.
+
+
+STEP 4B: GOOGLE DRIVE SETUP
+----------------------------
+1. Go to Google Cloud Console (console.cloud.google.com)
+2. Create new project
+3. Enable Google Drive API:
+   - Search "Google Drive API"
+   - Click Enable
+4. Create OAuth 2.0 credentials:
+   - Click "Create Credentials"
+   - Choose "OAuth client ID"
+   - Select "Desktop application"
+   - Download JSON file and name it "credentials.json"
+5. Place credentials.json in same directory as bot script
+6. Get Google Drive folder ID:
+   - Open your Google Drive folder
+   - Copy folder ID from URL (after /folders/)
+   - Paste as GOOGLE_DRIVE_FOLDER_ID
+
+
+STEP 5: INSTALL DEPENDENCIES
+-----------------------------
+pip install -r requirements.txt
+
+
+STEP 6: RUN BOT
+---------------
+python telegram_storage_bot.py
+
+First run with Google Drive will open browser for auth - allow access.
+Token will be saved as token.json for future runs.
+
+
+SUPPORTED FILE TYPES
+--------------------
+Images: jpg, jpeg, png, gif
+Videos: mp4, webm
+Documents: pdf, txt
+
+Files are randomly selected each day.
+
+
+TROUBLESHOOTING
+---------------
+1. "No module named telegram" → pip install -r requirements.txt
+2. "Bot token invalid" → Check token copied correctly from BotFather
+3. "Channel ID invalid" → Use -100 prefix, check with @RawDataBot
+4. "Google Drive auth fails" → Delete token.json and re-run
+5. "No files found" → Check folder path and file types
+6. Bot doesn't post → Check POST_HOUR and system timezone
+
+
+RUNNING IN BACKGROUND (Linux/Mac)
+----------------------------------
+nohup python telegram_storage_bot.py > bot.log 2>&1 &
+
+RUNNING IN BACKGROUND (Windows)
+--------------------------------
+Create a .bat file:
+   python telegram_storage_bot.py
+Run with Task Scheduler or as Windows Service
