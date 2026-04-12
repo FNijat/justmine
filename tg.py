@@ -243,6 +243,8 @@ def main():
         (int(t.split(":")[0]), int(t.split(":")[1]))
         for t in posting_times_raw.split(",")
     ]
+    logger.info(f"POSTING_TIMES raw value: {posting_times_raw}")
+    logger.info(f"POSTING_TIMES parsed: {POSTING_TIMES}")
 
     LOCAL_PATH = None
     
