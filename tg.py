@@ -3,7 +3,7 @@ import random
 import time
 import threading
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 
@@ -212,17 +212,20 @@ class TelegramStorageBot:
             now = datetime.now()
             next_post_time = None
             
-            # Find next posting time
+            # Find next posting time today
             for hour, minute in posting_times:
                 target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 if now < target_time and (next_post_time is None or target_time < next_post_time):
                     next_post_time = target_time
             
-            # If no posting time found today, use first time tomorrow
-            if next_post_time is None:
-                hour, minute = posting_times[0]
-                next_post_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                next_post_time = next_post_time.replace(day=next_post_time.day + 1)
+            # Also consider all posting times tomorrow and pick the overall soonest.
+            # This correctly handles early-morning times (e.g. 00:29) that are
+            # technically "tomorrow" by date but only a few hours away.
+            tomorrow = now + timedelta(days=1)
+            for hour, minute in posting_times:
+                target_time = tomorrow.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if next_post_time is None or target_time < next_post_time:
+                    next_post_time = target_time
             
             wait_seconds = (next_post_time - now).total_seconds()
             logger.info(f"Next post scheduled at {next_post_time}. Waiting {wait_seconds} seconds.")
