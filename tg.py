@@ -232,14 +232,19 @@ class TelegramStorageBot:
 
 
 def main():
-    # Configuration
-    BOT_TOKEN = "8574806727:AAEGZWDFb0rmjHxY8TlB0WjuMOep8ynNoiE"
-    CHANNEL_ID = -1003820108098
-    ITEMS_PER_DAY = 4
-    POSTING_TIMES = [(23, 24), (23, 19), (23, 22)]  # 10:00 AM, 3:00 PM, 9:00 PM
-    
+    # Configuration from environment variables
+    BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+    CHANNEL_ID = int(os.environ["TELEGRAM_CHANNEL_ID"])
+    GOOGLE_DRIVE_FOLDER_ID = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
+    ITEMS_PER_DAY = int(os.environ.get("ITEMS_PER_DAY", 1))
+
+    posting_times_raw = os.environ.get("POSTING_TIMES", "10:00,15:00,21:00")
+    POSTING_TIMES = [
+        (int(t.split(":")[0]), int(t.split(":")[1]))
+        for t in posting_times_raw.split(",")
+    ]
+
     LOCAL_PATH = None
-    GOOGLE_DRIVE_FOLDER_ID = "1Ppqdn09d1mE9w4ntzlXfHR53iCL3FAyJ"
     
     # Initialize bot
     bot = TelegramStorageBot(
