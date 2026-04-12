@@ -242,7 +242,7 @@ def main():
     GOOGLE_DRIVE_FOLDER_ID = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
     ITEMS_PER_DAY = int(os.environ.get("ITEMS_PER_DAY", 1))
 
-    posting_times_raw = os.environ.get("POSTING_TIMES", "10:00,15:00,21:00")
+    posting_times_raw = os.environ.get("POSTING_TIMES", "10:00,15:00,21:32")
     POSTING_TIMES = [
         (int(t.split(":")[0]), int(t.split(":")[1]))
         for t in posting_times_raw.split(",")
