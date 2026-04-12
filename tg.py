@@ -15,6 +15,12 @@ from google.api_core.exceptions import GoogleAPIError
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import io
+import time
+import os
+from datetime import datetime
+
+logger.info(f"Server timezone: {time.tzname}")
+logger.info(f"Current time: {datetime.now()}")
 
 # Configure logging
 logging.basicConfig(
