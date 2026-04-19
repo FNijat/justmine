@@ -42,31 +42,32 @@ class TelegramStorageBot:
             self._setup_google_drive()
     
     def _setup_google_drive(self):
-        """Initialize Google Drive API connection"""
-        SCOPES = ['https://www.googleapis.com/auth/drive.file']
+        """Initialize Google Drive API connection using pre-generated token"""
+        SCOPES = ['https://www.googleapis.com/auth/drive']
         creds = None
 
-        # One-time fix: clear any existing token so a fresh authorization is
-        # performed with the updated drive.file scope (old tokens may carry the
-        # deprecated drive.readonly scope and will be rejected by Google).
-        if os.path.exists('token.json'):
-            os.remove('token.json')
-            logger.info("Cleared existing token.json to force re-authorization with updated scopes")
-        
+        # If TOKEN_JSON env var is set, write it to disk (Railway deployment)
+        token_json_env = os.environ.get('TOKEN_JSON')
+        if token_json_env:
+            with open('token.json', 'w') as f:
+                f.write(token_json_env)
+            logger.info("Wrote token.json from TOKEN_JSON environment variable")
+
         if os.path.exists('token.json'):
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        
+
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+                with open('token.json', 'w') as token:
+                    token.write(creds.to_json())
+                logger.info("Refreshed expired credentials")
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'credentials.json', SCOPES)
-                creds = flow.run_console()
-            
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-        
+                raise RuntimeError(
+                    "No valid credentials found. "
+                    "Run generate_token.py locally and set TOKEN_JSON env var on Railway."
+                )
+
         self.drive_service = build('drive', 'v3', credentials=creds)
         logger.info("Google Drive API initialized")
     
@@ -101,7 +102,6 @@ class TelegramStorageBot:
         all_files = [f for f in path.iterdir() 
                 if f.is_file() and f.suffix.lower() in supported_formats]
         
-        # Filter out already posted files (by full path)
         unposted_files = [f for f in all_files if str(f) not in self.posted_files]
         
         if not unposted_files:
@@ -127,7 +127,6 @@ class TelegramStorageBot:
             ).execute()
             
             all_files = results.get('files', [])
-            # Filter out already posted files
             unposted_files = [f for f in all_files if f['id'] not in self.posted_files]
             
             if not unposted_files:
@@ -181,7 +180,6 @@ class TelegramStorageBot:
                 else:
                     self.bot.send_document(chat_id=self.channel_id, document=f, caption=caption, parse_mode='Markdown')
             
-            # Mark as posted
             self._mark_as_posted(str(file_path))
             logger.info(f"Posted: {file_path.name}")
         except telebot.apihelper.ApiException as e:
@@ -213,11 +211,9 @@ class TelegramStorageBot:
             else:
                 self.bot.send_document(chat_id=self.channel_id, document=file_content, visible_file_name=file_name, caption=caption, parse_mode='Markdown')
             
-            # Mark as posted
             self._mark_as_posted(file_id)
             logger.info(f"Posted from Drive: {file_name}")
 
-            # Delete the file from Google Drive now that it has been posted
             try:
                 self.drive_service.files().delete(fileId=file_id).execute()
                 logger.info(f"Deleted from Drive: {file_name} ({file_id})")
@@ -227,22 +223,16 @@ class TelegramStorageBot:
             logger.error(f"Error posting {file_name}: {e}")
     
     def schedule_daily_posts(self, posting_times):
-        """Schedule multiple daily postings at specific times
-        posting_times: list of tuples (hour, minute)
-        """
+        """Schedule multiple daily postings at specific times"""
         while True:
             now = datetime.now()
             next_post_time = None
             
-            # Find next posting time today
             for hour, minute in posting_times:
                 target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 if now < target_time and (next_post_time is None or target_time < next_post_time):
                     next_post_time = target_time
             
-            # Also consider all posting times tomorrow and pick the overall soonest.
-            # This correctly handles early-morning times (e.g. 00:29) that are
-            # technically "tomorrow" by date but only a few hours away.
             tomorrow = now + timedelta(days=1)
             for hour, minute in posting_times:
                 target_time = tomorrow.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -257,7 +247,6 @@ class TelegramStorageBot:
 
 
 def main():
-    # Configuration from environment variables
     BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
     CHANNEL_ID = int(os.environ["TELEGRAM_CHANNEL_ID"])
     GOOGLE_DRIVE_FOLDER_ID = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
@@ -277,7 +266,6 @@ def main():
         "CAPTION_LINK_FORMAT", "https://drive.google.com/file/d/{file_id}/view"
     )
 
-    # Initialize bot
     bot = TelegramStorageBot(
         bot_token=BOT_TOKEN,
         channel_id=CHANNEL_ID,
@@ -288,7 +276,6 @@ def main():
         caption_link_format=CAPTION_LINK_FORMAT,
     )
     
-    # Start scheduling in background thread
     scheduler_thread = threading.Thread(
         target=bot.schedule_daily_posts,
         args=(POSTING_TIMES,),
