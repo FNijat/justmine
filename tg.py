@@ -25,12 +25,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class TelegramStorageBot:
-    def __init__(self, bot_token, channel_id, google_drive_folder_id=None, local_path=None, items_per_day=1):
+    def __init__(self, bot_token, channel_id, google_drive_folder_id=None, local_path=None, items_per_day=1,
+                 caption_text="View file", caption_link_format="https://drive.google.com/file/d/{file_id}/view"):
         self.bot = telebot.TeleBot(bot_token)
         self.channel_id = channel_id
         self.google_drive_folder_id = google_drive_folder_id
         self.local_path = local_path
         self.items_per_day = items_per_day
+        self.caption_text = caption_text
+        self.caption_link_format = caption_link_format
         self.drive_service = None
         self.posted_files_db = "posted_files.json"
         self.posted_files = self._load_posted_files()
@@ -159,7 +162,8 @@ class TelegramStorageBot:
         """Post file from local storage"""
         file_path = Path(file_path)
         suffix = file_path.suffix.lower()
-        caption = f"[{file_path.name}](file://{file_path.resolve()})"
+        link = self.caption_link_format.format(file_path=file_path.resolve())
+        caption = f"[{self.caption_text}]({link})"
         
         try:
             with open(file_path, 'rb') as f:
@@ -192,8 +196,8 @@ class TelegramStorageBot:
             
             file_content.seek(0)
             mime_type = file_obj.get('mimeType', '')
-            drive_url = f"https://drive.google.com/file/d/{file_id}/view"
-            caption = f"[{file_name}]({drive_url})"
+            link = self.caption_link_format.format(file_id=file_id)
+            caption = f"[{self.caption_text}]({link})"
             
             if 'image' in mime_type:
                 self.bot.send_photo(chat_id=self.channel_id, photo=file_content, caption=caption, parse_mode='Markdown')
@@ -254,14 +258,20 @@ def main():
     logger.info(f"POSTING_TIMES parsed: {POSTING_TIMES}")
 
     LOCAL_PATH = None
-    
+    CAPTION_TEXT = os.environ.get("CAPTION_TEXT", "View file")
+    CAPTION_LINK_FORMAT = os.environ.get(
+        "CAPTION_LINK_FORMAT", "https://drive.google.com/file/d/{file_id}/view"
+    )
+
     # Initialize bot
     bot = TelegramStorageBot(
         bot_token=BOT_TOKEN,
         channel_id=CHANNEL_ID,
         google_drive_folder_id=GOOGLE_DRIVE_FOLDER_ID,
         local_path=LOCAL_PATH,
-        items_per_day=ITEMS_PER_DAY
+        items_per_day=ITEMS_PER_DAY,
+        caption_text=CAPTION_TEXT,
+        caption_link_format=CAPTION_LINK_FORMAT,
     )
     
     # Start scheduling in background thread
