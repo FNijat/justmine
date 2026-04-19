@@ -159,15 +159,16 @@ class TelegramStorageBot:
         """Post file from local storage"""
         file_path = Path(file_path)
         suffix = file_path.suffix.lower()
+        caption = f"[{file_path.name}](file://{file_path.resolve()})"
         
         try:
             with open(file_path, 'rb') as f:
                 if suffix in {'.jpg', '.jpeg', '.png', '.gif'}:
-                    self.bot.send_photo(chat_id=self.channel_id, photo=f)
+                    self.bot.send_photo(chat_id=self.channel_id, photo=f, caption=caption, parse_mode='Markdown')
                 elif suffix in {'.mp4', '.webm'}:
-                    self.bot.send_video(chat_id=self.channel_id, video=f)
+                    self.bot.send_video(chat_id=self.channel_id, video=f, caption=caption, parse_mode='Markdown')
                 else:
-                    self.bot.send_document(chat_id=self.channel_id, document=f)
+                    self.bot.send_document(chat_id=self.channel_id, document=f, caption=caption, parse_mode='Markdown')
             
             # Mark as posted
             self._mark_as_posted(str(file_path))
@@ -191,13 +192,15 @@ class TelegramStorageBot:
             
             file_content.seek(0)
             mime_type = file_obj.get('mimeType', '')
+            drive_url = f"https://drive.google.com/file/d/{file_id}/view"
+            caption = f"[{file_name}]({drive_url})"
             
             if 'image' in mime_type:
-                self.bot.send_photo(chat_id=self.channel_id, photo=file_content)
+                self.bot.send_photo(chat_id=self.channel_id, photo=file_content, caption=caption, parse_mode='Markdown')
             elif 'video' in mime_type:
-                self.bot.send_video(chat_id=self.channel_id, video=file_content)
+                self.bot.send_video(chat_id=self.channel_id, video=file_content, caption=caption, parse_mode='Markdown')
             else:
-                self.bot.send_document(chat_id=self.channel_id, document=file_content, visible_file_name=file_name)
+                self.bot.send_document(chat_id=self.channel_id, document=file_content, visible_file_name=file_name, caption=caption, parse_mode='Markdown')
             
             # Mark as posted
             self._mark_as_posted(file_id)
