@@ -17,7 +17,6 @@ from googleapiclient.http import MediaIoBaseDownload
 import io
 
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -26,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 class TelegramStorageBot:
     def __init__(self, bot_token, channel_id, google_drive_folder_id=None, local_path=None, items_per_day=1,
-                 caption_text="View file", caption_link_format="https://drive.google.com/file/d/{file_id}/view"):
+                 caption_text="View file", caption_link_format="https://drive.google.com/file/d/{file_id}/view",
+                 sleep_between_posts=10):
         self.bot = telebot.TeleBot(bot_token)
         self.channel_id = channel_id
         self.google_drive_folder_id = google_drive_folder_id
@@ -34,6 +34,7 @@ class TelegramStorageBot:
         self.items_per_day = items_per_day
         self.caption_text = caption_text
         self.caption_link_format = caption_link_format
+        self.sleep_between_posts = sleep_between_posts
         self.drive_service = None
         self.posted_files_db = "posted_files.json"
         self.posted_files = self._load_posted_files()
@@ -42,11 +43,9 @@ class TelegramStorageBot:
             self._setup_google_drive()
     
     def _setup_google_drive(self):
-        """Initialize Google Drive API connection using pre-generated token"""
         SCOPES = ['https://www.googleapis.com/auth/drive']
         creds = None
 
-        # If TOKEN_JSON env var is set, write it to disk (Railway deployment)
         token_json_env = os.environ.get('TOKEN_JSON')
         if token_json_env:
             with open('token.json', 'w') as f:
@@ -72,24 +71,20 @@ class TelegramStorageBot:
         logger.info("Google Drive API initialized")
     
     def _load_posted_files(self):
-        """Load list of already posted file IDs"""
         if os.path.exists(self.posted_files_db):
             with open(self.posted_files_db, 'r') as f:
                 return set(json.load(f))
         return set()
     
     def _save_posted_files(self):
-        """Save posted file IDs to database"""
         with open(self.posted_files_db, 'w') as f:
             json.dump(list(self.posted_files), f)
     
     def _mark_as_posted(self, file_id):
-        """Mark file as posted and save"""
         self.posted_files.add(file_id)
         self._save_posted_files()
     
     def _get_local_files(self):
-        """Get files from local directory"""
         if not self.local_path:
             return []
         
@@ -113,7 +108,6 @@ class TelegramStorageBot:
         return unposted_files
     
     def _get_drive_files(self):
-        """Get files from Google Drive folder"""
         if not self.drive_service:
             return []
         
@@ -141,7 +135,6 @@ class TelegramStorageBot:
             return []
     
     def post_content(self):
-        """Select random files and post to Telegram"""
         files = []
         
         if self.local_path:
@@ -155,7 +148,7 @@ class TelegramStorageBot:
         
         selected_files = random.sample(files, min(self.items_per_day, len(files)))
         
-        for file_obj in selected_files:
+        for i, file_obj in enumerate(selected_files):
             try:
                 if self.local_path:
                     self._post_local_file(file_obj)
@@ -163,9 +156,12 @@ class TelegramStorageBot:
                     self._post_drive_file(file_obj)
             except Exception as e:
                 logger.error(f"Error posting file: {e}")
-    
+            
+            if i < len(selected_files) - 1:
+                logger.info(f"Waiting {self.sleep_between_posts} seconds before next post.")
+                time.sleep(self.sleep_between_posts)
+
     def _post_local_file(self, file_path):
-        """Post file from local storage"""
         file_path = Path(file_path)
         suffix = file_path.suffix.lower()
         link = self.caption_link_format.format(file_path=file_path.resolve())
@@ -176,9 +172,9 @@ class TelegramStorageBot:
                 if suffix in {'.jpg', '.jpeg', '.png', '.gif'}:
                     self.bot.send_photo(chat_id=self.channel_id, photo=f, caption=caption, parse_mode='Markdown')
                 elif suffix in {'.mp4', '.webm'}:
-                    self.bot.send_video(chat_id=self.channel_id, video=f, caption=caption, parse_mode='Markdown')
+                    self.bot.send_video(chat_id=self.channel_id, video=f, caption=caption, parse_mode='Markdown', timeout=120)
                 else:
-                    self.bot.send_document(chat_id=self.channel_id, document=f, caption=caption, parse_mode='Markdown')
+                    self.bot.send_document(chat_id=self.channel_id, document=f, caption=caption, parse_mode='Markdown', timeout=120)
             
             self._mark_as_posted(str(file_path))
             logger.info(f"Posted: {file_path.name}")
@@ -186,44 +182,53 @@ class TelegramStorageBot:
             logger.error(f"Telegram error posting {file_path.name}: {e}")
     
     def _post_drive_file(self, file_obj):
-        """Post file from Google Drive"""
         file_id = file_obj['id']
         file_name = file_obj['name']
-        
-        try:
-            request = self.drive_service.files().get_media(fileId=file_id)
-            file_content = io.BytesIO()
-            downloader = MediaIoBaseDownload(file_content, request)
-            
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-            
-            file_content.seek(0)
-            mime_type = file_obj.get('mimeType', '')
-            link = self.caption_link_format.format(file_id=file_id)
-            caption = f"[{self.caption_text}]({link})"
-            
-            if 'image' in mime_type:
-                self.bot.send_photo(chat_id=self.channel_id, photo=file_content, caption=caption, parse_mode='Markdown')
-            elif 'video' in mime_type:
-                self.bot.send_video(chat_id=self.channel_id, video=file_content, caption=caption, parse_mode='Markdown')
-            else:
-                self.bot.send_document(chat_id=self.channel_id, document=file_content, visible_file_name=file_name, caption=caption, parse_mode='Markdown')
-            
-            self._mark_as_posted(file_id)
-            logger.info(f"Posted from Drive: {file_name}")
+        max_retries = 3
 
+        for attempt in range(max_retries):
             try:
-                self.drive_service.files().delete(fileId=file_id).execute()
-                logger.info(f"Deleted from Drive: {file_name} ({file_id})")
-            except GoogleAPIError as delete_err:
-                logger.error(f"Failed to delete {file_name} ({file_id}) from Drive: {delete_err}")
-        except (telebot.apihelper.ApiException, GoogleAPIError) as e:
-            logger.error(f"Error posting {file_name}: {e}")
-    
+                request = self.drive_service.files().get_media(fileId=file_id)
+                file_content = io.BytesIO()
+                downloader = MediaIoBaseDownload(file_content, request)
+
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
+
+                file_content.seek(0)
+                mime_type = file_obj.get('mimeType', '')
+                link = self.caption_link_format.format(file_id=file_id)
+                caption = f"[{self.caption_text}]({link})"
+
+                if 'image' in mime_type:
+                    self.bot.send_photo(chat_id=self.channel_id, photo=file_content, caption=caption, parse_mode='Markdown')
+                elif 'video' in mime_type:
+                    self.bot.send_video(chat_id=self.channel_id, video=file_content, caption=caption, parse_mode='Markdown', timeout=120)
+                else:
+                    self.bot.send_document(chat_id=self.channel_id, document=file_content, visible_file_name=file_name, caption=caption, parse_mode='Markdown', timeout=120)
+
+                self._mark_as_posted(file_id)
+                logger.info(f"Posted from Drive: {file_name}")
+
+                try:
+                    self.drive_service.files().delete(fileId=file_id).execute()
+                    logger.info(f"Deleted from Drive: {file_name} ({file_id})")
+                except GoogleAPIError as delete_err:
+                    logger.error(f"Failed to delete {file_name} ({file_id}) from Drive: {delete_err}")
+
+                break
+
+            except (telebot.apihelper.ApiException, GoogleAPIError) as e:
+                logger.error(f"Error posting {file_name} (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+            except Exception as e:
+                logger.error(f"Unexpected error posting {file_name} (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+
     def schedule_daily_posts(self, posting_times):
-        """Schedule multiple daily postings at specific times"""
         while True:
             now = datetime.now()
             next_post_time = None
@@ -251,6 +256,7 @@ def main():
     CHANNEL_ID = int(os.environ["TELEGRAM_CHANNEL_ID"])
     GOOGLE_DRIVE_FOLDER_ID = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
     ITEMS_PER_DAY = int(os.environ.get("ITEMS_PER_DAY", 1))
+    SLEEP_BETWEEN_POSTS = int(os.environ.get("SLEEP_BETWEEN_POSTS", 10))
 
     posting_times_raw = os.environ.get("POSTING_TIMES", "10:00,15:00,21:11")
     POSTING_TIMES = [
@@ -274,6 +280,7 @@ def main():
         items_per_day=ITEMS_PER_DAY,
         caption_text=CAPTION_TEXT,
         caption_link_format=CAPTION_LINK_FORMAT,
+        sleep_between_posts=SLEEP_BETWEEN_POSTS,
     )
     
     scheduler_thread = threading.Thread(
