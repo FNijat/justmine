@@ -45,6 +45,13 @@ class TelegramStorageBot:
         """Initialize Google Drive API connection"""
         SCOPES = ['https://www.googleapis.com/auth/drive.file']
         creds = None
+
+        # One-time fix: clear any existing token so a fresh authorization is
+        # performed with the updated drive.file scope (old tokens may carry the
+        # deprecated drive.readonly scope and will be rejected by Google).
+        if os.path.exists('token.json'):
+            os.remove('token.json')
+            logger.info("Cleared existing token.json to force re-authorization with updated scopes")
         
         if os.path.exists('token.json'):
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
