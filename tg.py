@@ -43,7 +43,7 @@ class TelegramStorageBot:
     
     def _setup_google_drive(self):
         """Initialize Google Drive API connection"""
-        SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+        SCOPES = ['https://www.googleapis.com/auth/drive.file']
         creds = None
         
         if os.path.exists('token.json'):
@@ -209,6 +209,13 @@ class TelegramStorageBot:
             # Mark as posted
             self._mark_as_posted(file_id)
             logger.info(f"Posted from Drive: {file_name}")
+
+            # Delete the file from Google Drive now that it has been posted
+            try:
+                self.drive_service.files().delete(fileId=file_id).execute()
+                logger.info(f"Deleted from Drive: {file_name} ({file_id})")
+            except GoogleAPIError as delete_err:
+                logger.error(f"Failed to delete {file_name} ({file_id}) from Drive: {delete_err}")
         except (telebot.apihelper.ApiException, GoogleAPIError) as e:
             logger.error(f"Error posting {file_name}: {e}")
     
