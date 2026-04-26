@@ -3,6 +3,8 @@ import random
 import time
 import threading
 import json
+import subprocess
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 import logging
@@ -22,6 +24,61 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def reencode_video_for_telegram(input_bytes: bytes, original_name: str) -> bytes:
+    """
+    Re-encode video to H.264/AAC MP4 with faststart flag.
+    Returns re-encoded bytes, or original bytes if ffmpeg fails.
+    """
+    tmp_in = None
+    tmp_out = None
+    try:
+        suffix_in = Path(original_name).suffix or '.mp4'
+        with tempfile.NamedTemporaryFile(suffix=suffix_in, delete=False) as f:
+            f.write(input_bytes)
+            tmp_in = f.name
+
+        tmp_out = tmp_in.rsplit('.', 1)[0] + '_out.mp4'
+
+        result = subprocess.run(
+            [
+                'ffmpeg', '-y', '-i', tmp_in,
+                '-c:v', 'libx264',
+                '-c:a', 'aac',
+                '-movflags', '+faststart',
+                '-loglevel', 'error',
+                tmp_out
+            ],
+            capture_output=True,
+            timeout=300
+        )
+
+        if result.returncode != 0:
+            logger.error(f"ffmpeg failed for {original_name}: {result.stderr.decode()}")
+            return input_bytes
+
+        with open(tmp_out, 'rb') as f:
+            encoded_bytes = f.read()
+
+        logger.info(f"Re-encoded {original_name}: {len(input_bytes)} -> {len(encoded_bytes)} bytes")
+        return encoded_bytes
+
+    except FileNotFoundError:
+        logger.error("ffmpeg not found. Install it via nixpacks.toml: nixPkgs = [\"ffmpeg\"]")
+        return input_bytes
+    except subprocess.TimeoutExpired:
+        logger.error(f"ffmpeg timed out processing {original_name}")
+        return input_bytes
+    except Exception as e:
+        logger.error(f"Unexpected error during re-encoding {original_name}: {e}")
+        return input_bytes
+    finally:
+        if tmp_in and os.path.exists(tmp_in):
+            os.unlink(tmp_in)
+        if tmp_out and os.path.exists(tmp_out):
+            os.unlink(tmp_out)
+
 
 class TelegramStorageBot:
     def __init__(self, bot_token, channel_id, google_drive_folder_id=None, local_path=None, items_per_day=1,
@@ -169,12 +226,32 @@ class TelegramStorageBot:
         
         try:
             with open(file_path, 'rb') as f:
-                if suffix in {'.jpg', '.jpeg', '.png', '.gif'}:
-                    self.bot.send_photo(chat_id=self.channel_id, photo=f, caption=caption, parse_mode='Markdown')
-                elif suffix in {'.mp4', '.webm'}:
-                    self.bot.send_video(chat_id=self.channel_id, video=f, caption=caption, parse_mode='Markdown', timeout=120)
-                else:
-                    self.bot.send_document(chat_id=self.channel_id, document=f, caption=caption, parse_mode='Markdown', timeout=120)
+                raw = f.read()
+
+            if suffix in {'.jpg', '.jpeg', '.png', '.gif'}:
+                self.bot.send_photo(
+                    chat_id=self.channel_id,
+                    photo=io.BytesIO(raw),
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
+            elif suffix in {'.mp4', '.webm', '.mov', '.mkv', '.avi'}:
+                encoded = reencode_video_for_telegram(raw, file_path.name)
+                self.bot.send_video(
+                    chat_id=self.channel_id,
+                    video=('video.mp4', io.BytesIO(encoded)),
+                    caption=caption,
+                    parse_mode='Markdown',
+                    timeout=120
+                )
+            else:
+                self.bot.send_document(
+                    chat_id=self.channel_id,
+                    document=io.BytesIO(raw),
+                    caption=caption,
+                    parse_mode='Markdown',
+                    timeout=120
+                )
             
             self._mark_as_posted(str(file_path))
             logger.info(f"Posted: {file_path.name}")
@@ -197,16 +274,37 @@ class TelegramStorageBot:
                     status, done = downloader.next_chunk()
 
                 file_content.seek(0)
+                raw_bytes = file_content.read()
+
                 mime_type = file_obj.get('mimeType', '')
                 link = self.caption_link_format.format(file_id=file_id)
                 caption = f"[{self.caption_text}]({link})"
 
                 if 'image' in mime_type:
-                    self.bot.send_photo(chat_id=self.channel_id, photo=file_content, caption=caption, parse_mode='Markdown')
+                    self.bot.send_photo(
+                        chat_id=self.channel_id,
+                        photo=io.BytesIO(raw_bytes),
+                        caption=caption,
+                        parse_mode='Markdown'
+                    )
                 elif 'video' in mime_type:
-                    self.bot.send_video(chat_id=self.channel_id, video=file_content, caption=caption, parse_mode='Markdown', timeout=120)
+                    encoded_bytes = reencode_video_for_telegram(raw_bytes, file_name)
+                    self.bot.send_video(
+                        chat_id=self.channel_id,
+                        video=('video.mp4', io.BytesIO(encoded_bytes)),
+                        caption=caption,
+                        parse_mode='Markdown',
+                        timeout=120
+                    )
                 else:
-                    self.bot.send_document(chat_id=self.channel_id, document=file_content, visible_file_name=file_name, caption=caption, parse_mode='Markdown', timeout=120)
+                    self.bot.send_document(
+                        chat_id=self.channel_id,
+                        document=io.BytesIO(raw_bytes),
+                        visible_file_name=file_name,
+                        caption=caption,
+                        parse_mode='Markdown',
+                        timeout=120
+                    )
 
                 self._mark_as_posted(file_id)
                 logger.info(f"Posted from Drive: {file_name}")
