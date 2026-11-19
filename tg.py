@@ -346,7 +346,22 @@ class TelegramStorageBot:
             logger.info(f"Next post scheduled at {next_post_time}. Waiting {wait_seconds} seconds.")
             
             time.sleep(wait_seconds)
-            self.post_content()
+            self._run_scheduled_post()
+
+    def _run_scheduled_post(self, attempts=3):
+        # Never let an error kill the scheduler thread. Rebuild the Drive client
+        # each run: connections idle for hours get closed server-side (BrokenPipe).
+        for attempt in range(1, attempts + 1):
+            try:
+                if self.google_drive_folder_id:
+                    self._setup_google_drive()
+                self.post_content()
+                return
+            except Exception:
+                logger.exception(f"Scheduled post failed (attempt {attempt}/{attempts})")
+                if attempt < attempts:
+                    time.sleep(30)
+        logger.error("Scheduled post gave up; waiting for next slot")
 
 
 def main():
@@ -393,6 +408,9 @@ def main():
     try:
         while True:
             time.sleep(1)
+            if not scheduler_thread.is_alive():
+                logger.critical("Scheduler thread died; exiting so Railway restarts the service.")
+                raise SystemExit(1)
     except KeyboardInterrupt:
         logger.info("Bot stopped.")
 
