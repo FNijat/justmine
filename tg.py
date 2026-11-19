@@ -4,6 +4,7 @@ import time
 import threading
 import json
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,6 +21,7 @@ import io
 
 
 logging.basicConfig(
+    stream=sys.stdout,  # stdout so Railway doesn't label INFO lines as errors
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
@@ -45,6 +47,10 @@ def reencode_video_for_telegram(input_bytes: bytes, original_name: str) -> bytes
             [
                 'ffmpeg', '-y', '-i', tmp_in,
                 '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-crf', '28',
+                '-threads', '2',
+                '-pix_fmt', 'yuv420p',
                 '-c:a', 'aac',
                 '-movflags', '+faststart',
                 '-loglevel', 'error',
@@ -55,7 +61,11 @@ def reencode_video_for_telegram(input_bytes: bytes, original_name: str) -> bytes
         )
 
         if result.returncode != 0:
-            logger.error(f"ffmpeg failed for {original_name}: {result.stderr.decode()}")
+            logger.error(
+                f"ffmpeg failed for {original_name}: returncode={result.returncode} "
+                f"(negative = killed by signal, e.g. -9 = out of memory): "
+                f"{result.stderr.decode(errors='replace')[-500:]}"
+            )
             return input_bytes
 
         with open(tmp_out, 'rb') as f:
